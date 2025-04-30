@@ -109,4 +109,14 @@ class ProductAdmin(TranslationAdmin):
     get_image.short_description = 'Surati'
 
 
+@admin.register(Coupons)
+class CouponAdmin(admin.ModelAdmin):
+    list_display = ('id', 'code', 'price', 'count', 'used_count', 'created_at', 'expires_at')
+    list_display_links = ('id', 'code')
+    readonly_fields = ('used_count',)
 
+
+@admin.register(UserCoupon)
+class CouponAdmin(admin.ModelAdmin):
+    list_display = ('id', 'user', 'coupon')
+    list_display_links = ('id', 'user')

@@ -20,6 +20,7 @@ urlpatterns = [
 
     # other
     path('cart/', Cart.as_view(), name='cart'),
+    path('cart/apply', ApplyCoupon.as_view(), name='apply-coupon'),
     path('check-out/', Checkout.as_view(), name='check-out'),
     path('testimonial/', Testimonial.as_view(), name='testimonial'),
     path('contact/', Contact.as_view(), name='contact'),

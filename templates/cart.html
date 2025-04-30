@@ -99,10 +99,14 @@
 
             </table>
         </div>
-        <div class="mt-5">
-            <input type="text" class="border-0 border-bottom rounded me-5 py-3 mb-4" placeholder="{% trans 'Kupon kodi' %}">
-            <button class="btn border-secondary rounded-pill px-4 py-3 text-primary" type="button">{% trans "Kuponni qo'llash" %}</button>
-        </div>
+        <form method="post" action="{% url 'apply-coupon' %}">
+            {% csrf_token %}
+            <div class="mt-5">
+                <input type="text" name="coupon" class="border-0 border-bottom rounded me-5 py-3 mb-4" placeholder="{% trans 'Kupon kodi' %}">
+                <button class="btn border-secondary rounded-pill px-4 py-3 text-primary" type="submit">{% trans "Kuponni qo'llash" %}</button>
+            </div>
+        </form>
+
         <div class="row g-4 justify-content-end">
             <div class="col-8"></div>
             <div class="col-sm-8 col-md-7 col-lg-6 col-xl-4">
@@ -113,6 +117,12 @@
                             <h5 class="mb-0 me-4">{% trans 'Qisman' %}:</h5>
                             <p class="mb-0">{{ total }} UZS</p>
                         </div>
+                        {% if coupon_price %}
+                        <div class="d-flex justify-content-between mb-4">
+                            <h5 class="mb-0 me-4">{% trans 'Kupon narxi' %}:</h5>
+                            <p class="mb-0">{{ coupon_price }} UZS</p>
+                        </div>
+                        {% endif %}
                         <div class="d-flex justify-content-between">
                             <h5 class="mb-0 me-4">{% trans 'Yetkazib berish' %}</h5>
                             <div class="">

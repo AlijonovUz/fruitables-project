@@ -1,4 +1,5 @@
 import random
+from decimal import Decimal
 
 from django.shortcuts import render, redirect, get_object_or_404, get_list_or_404
 from django.contrib.auth import login, logout, authenticate, update_session_auth_hash
@@ -140,22 +141,37 @@ class CartAction(LoginRequiredMixin, View):
         product_id = str(product.pk)
 
         products = request.session.get('products', {})
+        total_price = Decimal(str(request.session.get('total_price', '0')))
 
         if action == 'minus':
             products[product_id] -= 1
+
+            if total_price:
+                total_price -= product.price
+                request.session['total_price'] = str(total_price)
+
         elif action == 'plus':
+
             if products.get(product_id, 0) + 1 > product.quantity:
                 product_name = product.name
-                messages.error(request, _("%(product_name)s mahsuloti sotuvda tugadi.") % {"product_name": product_name})
+                messages.error(request,
+                               _("%(product_name)s mahsuloti sotuvda tugadi.") % {"product_name": product_name})
                 return redirect(request.META.get('HTTP_REFERER', 'home'))
             products[product_id] += 1
+
+            if total_price:
+                total_price += product.price
+                request.session['total_price'] = str(total_price)
+
         elif action is None:
             product_name = product.name
             if not quantity > product.quantity:
                 if product_id in products:
-                    messages.warning(request, _("%(product_name)s savatchaga allaqachon qo'shilgan.") % {"product_name": product_name})
+                    messages.warning(request, _("%(product_name)s savatchaga allaqachon qo'shilgan.") % {
+                        "product_name": product_name})
                 else:
-                    messages.success(request, _("%(product_name)s savatchaga qo'shildi.") % {"product_name": product_name})
+                    messages.success(request,
+                                     _("%(product_name)s savatchaga qo'shildi.") % {"product_name": product_name})
                     products[product_id] = quantity
             else:
                 messages.error(request, _("Yaroqsiz miqdor kiritildi."))
@@ -180,13 +196,91 @@ class DeleteCart(LoginRequiredMixin, View):
         products = request.session.get('products')
 
         if str(product.pk) in products:
-            messages.warning(request, _("%(product_name)s savatchadan olib tashlandi.") % {"product_name": product.name})
-            del products[str(product.pk)]
+            messages.warning(request,
+                             _("%(product_name)s savatchadan olib tashlandi.") % {"product_name": product.name})
+            products.pop(str(product.pk), None)
+
+            for key in ['total_price', 'shipping_price', 'coupon_used', 'coupon_price']:
+                request.session.pop(key, None)
 
         request.session['products'] = products
         request.session.modified = True
 
         return redirect(request.META.get('HTTP_REFERER', 'home'))
+
+
+def calculate_cart_total(request, coupon=None):
+    products = request.session.get('products', {})
+    products_details = []
+    shipping = 50000
+    total = 0
+
+    for pk, quantity in products.items():
+        product = get_object_or_404(Product, pk=pk)
+
+        price = product.get_discount_price() if product.get_discount_price() else product.price
+
+        total_price = price * quantity
+        total += total_price
+
+        products_details.append({
+            'product': product,
+            'quantity': quantity,
+            'total_price': total_price
+        })
+
+    if coupon:
+        if products:
+            try:
+                coupon.apply_coupon(request.user)
+
+                if coupon.coupon_type == 'SALE':
+                    total -= coupon.price
+                elif coupon.coupon_type == 'FREESHIP':
+                    shipping = max(0, shipping - coupon.price)
+
+                request.session['coupon_used'] = True
+                request.session['coupon_price'] = str(coupon.price)
+                request.session['total_price'] = str(total)
+                request.session['shipping_price'] = str(shipping)
+
+                messages.success(request, _('Kupon muvaffaqiyatli qo\'llandi!'))
+            except ValidationError as e:
+                messages.error(request, e.args[0])
+
+    return {
+        'products': products_details,
+        'total': total,
+        'shipping': shipping,
+    }
+
+
+class ApplyCoupon(LoginRequiredMixin, View):
+    login_url = reverse_lazy('register')
+
+    def post(self, request):
+
+        coupon_code = request.POST.get('coupon')
+        if not coupon_code:
+            messages.error(request, _('Kupon kodi kiritilmadi!'))
+            return redirect('cart')
+
+        coupon_used = request.session.get('coupon_used')
+        if coupon_used:
+            messages.error(request, _('Ushbu buyurtma uchun kupon allaqachon ishlatilgan!'))
+            return redirect('cart')
+
+        coupon = Coupons.objects.filter(code=coupon_code).first()
+        if not coupon:
+            messages.error(request, _('Kupon kodi topilmadi!'))
+            return redirect('cart')
+
+        products = calculate_cart_total(request, coupon).get('products')
+        if not products:
+            messages.error(request, _('Savatingiz bo\'sh!'))
+            return redirect('cart')
+
+        return redirect('cart')
 
 
 class Cart(LoginRequiredMixin, ListView):
@@ -199,32 +293,27 @@ class Cart(LoginRequiredMixin, ListView):
 
     def get_context_data(self, *, object_list=None, **kwargs):
         context = super().get_context_data(**kwargs)
-        products: dict = self.request.session.get('products', {})
-        products_details = []
-        shipping = 50000
-        total = 0
 
-        for pk, quantity in products.items():
-            product = Product.objects.get(pk=pk)
+        calculate = calculate_cart_total(self.request)
 
-            if product.get_discount_price():
-                price = product.get_discount_price()
-            else:
-                price = product.price
+        products = calculate.get('products')
+        total = calculate.get('total')
+        shipping = calculate.get('shipping')
 
-            total_price = price * quantity
+        coupon_used = self.request.session.get('coupon_used')
+        coupon_price = self.request.session.get('coupon_price')
+        total_price = self.request.session.get('total_price')
+        shipping_price = self.request.session.get('shipping_price')
 
-            total += total_price
+        if coupon_used:
+            context['total'] = total_price
+            context['shipping'] = shipping_price
+        else:
+            context['total'] = total
+            context['shipping'] = shipping
 
-            products_details.append({
-                'product': product,
-                'quantity': quantity,
-                'total_price': total_price
-            })
-
-        context['products'] = products_details
-        context['total'] = total
-        context['shipping'] = shipping
+        context['products'] = products
+        context['coupon_price'] = coupon_price if coupon_price else None
         return context
 
 
@@ -243,7 +332,7 @@ class RegisterView(LoginNoRequired, CreateView):
     success_url = reverse_lazy('login')
     template_name = "registration/register.html"
     login_url = reverse_lazy('home')
-    
+
     def form_valid(self, form):
         messages.success(self.request, _("Siz muvaffaqiyatli ro'yxatdan o'tdingiz!"))
         return super().form_valid(form)
